@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from src.config_manager import AppConfig, load_config, save_config
+from src.installer import get_install_marker_path, is_installed, perform_install
 from src.logger import get_log_file, setup_crash_logging
 from src.update_service import is_newer_version, parse_version, validate_update_url
 from src.youtube_service import (
@@ -128,6 +129,19 @@ class TestCrashLogger(unittest.TestCase):
                 for h in list(logger.handlers):
                     h.close()
                     logger.removeHandler(h)
+
+
+class TestInstaller(unittest.TestCase):
+    def test_perform_install_creates_marker_and_config(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            with patch.dict("os.environ", {"APPDATA": tmpdir}), patch(
+                "src.installer._create_desktop_shortcut"
+            ):
+                self.assertFalse(is_installed())
+                perform_install()
+                self.assertTrue(is_installed())
+                self.assertTrue(get_install_marker_path().is_file())
+                self.assertTrue((Path(tmpdir) / "mansu-loader" / "config.json").is_file())
 
 
 if __name__ == "__main__":

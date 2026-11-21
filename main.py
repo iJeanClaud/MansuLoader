@@ -1,11 +1,15 @@
-"""Ponto de entrada do MansuLoader com splash screen compacta e barra de progresso."""
+"""Ponto de entrada do MansuLoader: instalador inicial, splash screen e pré-verificação de atualização."""
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 import threading
 import tkinter as tk
 from pathlib import Path
+from typing import Optional
+
 from PIL import Image, ImageTk
 
 
@@ -18,8 +22,17 @@ def _get_asset_path(filename: str) -> Path:
     return Path(__file__).resolve().parent / "assets" / filename
 
 
-def _show_splash_and_load() -> type:
-    """Exibe uma splash screen compacta enquanto carrega os módulos pesados."""
+def _close_pyi_splash() -> None:
+    try:
+        import pyi_splash  # type: ignore[import-not-found]
+
+        pyi_splash.close()
+    except Exception:
+        pass
+
+
+def _show_splash_and_load() -> tuple[Optional[type], Optional[object]]:
+    """Exibe splash screen compacta enquanto carrega módulos e verifica atualização."""
     root = tk.Tk()
     root.overrideredirect(True)
     root.configure(bg="#FF3B5C")
@@ -35,7 +48,6 @@ def _show_splash_and_load() -> type:
     container.pack(fill="both", expand=True, padx=1, pady=1)
 
     splash_path = _get_asset_path("splash.png")
-    photo_ref = None
     if splash_path.is_file():
         img = Image.open(splash_path).resize((438, 246), Image.Resampling.LANCZOS)
         photo_ref = ImageTk.PhotoImage(img)
@@ -74,15 +86,23 @@ def _show_splash_and_load() -> type:
         "target": 0.15,
         "status": "Inicializando MansuLoader...",
         "app_cls": None,
+        "update_info": None,
         "error": None,
         "done": False,
     }
 
     def load_modules() -> None:
         try:
-            state["status"] = "Carregando configurações..."
+            state["status"] = "Verificando atualizações..."
             state["target"] = 0.30
-            import src.config_manager  # noqa: F401
+            from src.update_service import check_for_update
+
+            update_info = check_for_update()
+            if update_info is not None:
+                state["update_info"] = update_info
+                state["status"] = "Atualização disponível!"
+                state["target"] = 1.0
+                return
 
             state["status"] = "Carregando motor de áudio (yt-dlp)..."
             state["target"] = 0.72
@@ -118,28 +138,177 @@ def _show_splash_and_load() -> type:
 
     threading.Thread(target=load_modules, daemon=True).start()
     root.update()
-    try:
-        import pyi_splash  # type: ignore[import-not-found]
-
-        pyi_splash.close()
-    except Exception:
-        pass
+    _close_pyi_splash()
     root.after(20, animate)
     root.mainloop()
 
     if state["error"] is not None:
         raise state["error"]  # type: ignore[misc]
-    return state["app_cls"]  # type: ignore[return-value]
+    return state["app_cls"], state["update_info"]  # type: ignore[return-value]
+
+
+def _show_prelaunch_update_prompt(update_info) -> bool:
+    """Exibe aviso antes de abrir o app. Retorna True se o usuário escolher Atualizar."""
+    root = tk.Tk()
+    root.overrideredirect(True)
+    root.configure(bg="#FF3B5C")
+    root.attributes("-topmost", True)
+
+    w, h = 420, 215
+    root.update_idletasks()
+    x = max(0, (root.winfo_screenwidth() - w) // 2)
+    y = max(0, (root.winfo_screenheight() - h) // 2)
+    root.geometry(f"{w}x{h}+{x}+{y}")
+
+    box = tk.Frame(root, bg="#171A23")
+    box.pack(fill="both", expand=True, padx=1, pady=1)
+
+    tk.Label(
+        box,
+        text="Atualização disponível",
+        bg="#171A23",
+        fg="#F3F4F6",
+        font=("Segoe UI", 15, "bold"),
+    ).pack(pady=(22, 10))
+
+    tk.Label(
+        box,
+        text=(
+            f"Uma nova versão (v{update_info.latest_version}) está disponível.\n"
+            f"Versão atual: v{update_info.current_version}"
+        ),
+        bg="#171A23",
+        fg="#9CA3AF",
+        font=("Segoe UI", 10),
+        justify="center",
+    ).pack(pady=(0, 8))
+
+    tk.Label(
+        box,
+        text="Como deseja prosseguir?",
+        bg="#171A23",
+        fg="#6B7280",
+        font=("Segoe UI", 9),
+    ).pack(pady=(0, 16))
+
+    choice = {"update": False}
+
+    def on_update() -> None:
+        choice["update"] = True
+        root.destroy()
+
+    def on_exit() -> None:
+        choice["update"] = False
+        root.destroy()
+
+    btn_frame = tk.Frame(box, bg="#171A23")
+    btn_frame.pack(pady=(0, 18))
+
+    tk.Button(
+        btn_frame,
+        text="Atualizar",
+        width=14,
+        bg="#FF3B5C",
+        fg="#FFFFFF",
+        activebackground="#E02E4D",
+        activeforeground="#FFFFFF",
+        relief="flat",
+        font=("Segoe UI", 10, "bold"),
+        cursor="hand2",
+        command=on_update,
+    ).pack(side="left", padx=(0, 10), ipady=5)
+
+    tk.Button(
+        btn_frame,
+        text="Sair",
+        width=12,
+        bg="#1E222E",
+        fg="#F3F4F6",
+        activebackground="#2A3040",
+        activeforeground="#FFFFFF",
+        relief="flat",
+        font=("Segoe UI", 10, "bold"),
+        cursor="hand2",
+        command=on_exit,
+    ).pack(side="left", ipady=5)
+
+    root.mainloop()
+    return choice["update"]
+
+
+def _launch_external_updater(update_info) -> None:
+    """Inicia o MansuLoaderUpdater.exe e encerra o processo atual."""
+    from src.installer import get_installed_app_exe, get_installed_updater_exe
+
+    updater_exe = get_installed_updater_exe()
+    target_exe = (
+        Path(sys.executable).resolve()
+        if getattr(sys, "frozen", False)
+        else get_installed_app_exe()
+    )
+
+    if updater_exe.is_file():
+        subprocess.Popen(
+            [
+                str(updater_exe),
+                "--url",
+                update_info.download_url,
+                "--target",
+                str(target_exe),
+                "--pid",
+                str(os.getpid()),
+                "--version",
+                update_info.latest_version,
+            ],
+            close_fds=True,
+        )
+    else:
+        updater_script = Path(__file__).resolve().parent / "updater_main.py"
+        if updater_script.is_file():
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    str(updater_script),
+                    "--url",
+                    update_info.download_url,
+                    "--target",
+                    str(target_exe),
+                    "--pid",
+                    str(os.getpid()),
+                    "--version",
+                    update_info.latest_version,
+                ],
+                close_fds=True,
+            )
 
 
 def main() -> None:
+    from src.installer import get_installed_app_exe, is_installed, run_installer_ui
     from src.logger import log_exception, setup_crash_logging
 
     setup_crash_logging()
     try:
-        app_cls = _show_splash_and_load()
-        app = app_cls()
-        app.mainloop()
+        if not is_installed():
+            _close_pyi_splash()
+            should_open = run_installer_ui()
+            if should_open:
+                installed_exe = get_installed_app_exe()
+                if getattr(sys, "frozen", False) and installed_exe.is_file():
+                    subprocess.Popen([str(installed_exe)], close_fds=True)
+                    return
+            else:
+                return
+
+        app_cls, update_info = _show_splash_and_load()
+        if update_info is not None:
+            wants_update = _show_prelaunch_update_prompt(update_info)
+            if wants_update:
+                _launch_external_updater(update_info)
+            return
+
+        if app_cls is not None:
+            app = app_cls()
+            app.mainloop()
     except Exception as exc:
         log_exception("Erro fatal no aplicativo", exc)
         raise

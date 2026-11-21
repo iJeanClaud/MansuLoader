@@ -20,12 +20,12 @@ class AppConfig:
 
 
 def get_config_path() -> Path:
-    """Retorna o caminho do arquivo config.json em %APPDATA%\\MansuLoader."""
+    """Retorna o caminho do arquivo config.json em %APPDATA%\\mansu-loader."""
     appdata = os.environ.get("APPDATA")
     if appdata:
-        base_dir = Path(appdata) / "MansuLoader"
+        base_dir = Path(appdata) / "mansu-loader"
     else:
-        base_dir = Path.home() / ".mansuloader"
+        base_dir = Path.home() / ".mansu-loader"
     base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir / "config.json"
 

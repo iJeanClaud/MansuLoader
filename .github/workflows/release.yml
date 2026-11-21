@@ -38,8 +38,16 @@ jobs:
         run: |
           python -m unittest discover -s tests -v
 
-      - name: Gerar MansuLoader.exe
+      - name: Gerar MansuLoaderUpdater.exe e MansuLoader.exe
         run: |
+          pyinstaller `
+            --noconfirm `
+            --onefile `
+            --windowed `
+            --name MansuLoaderUpdater `
+            --icon "assets\mansuloader.ico" `
+            updater_main.py
+
           pyinstaller `
             --noconfirm `
             --onefile `
@@ -48,6 +56,7 @@ jobs:
             --icon "assets\mansuloader.ico" `
             --splash "assets\splash.png" `
             --add-data "assets;assets" `
+            --add-binary "dist\MansuLoaderUpdater.exe;." `
             --add-binary "C:\ffmpeg\bin\ffmpeg.exe;." `
             --collect-all customtkinter `
             --collect-all yt_dlp `

@@ -22,6 +22,7 @@ from src.update_service import (
     download_update,
     launch_updater_and_exit,
 )
+from src.version import APP_VERSION
 from src.youtube_service import (
     DownloadCancelled,
     DownloadProgress,
@@ -89,7 +90,7 @@ class MansuLoaderApp(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        self.title("MansuLoader — YouTube para MP3")
+        self.title(f"MansuLoader v{APP_VERSION} — YouTube para MP3")
         self.resizable(False, False)
         self.overrideredirect(True)
         self.configure(fg_color=BORDER_SUBTLE)
@@ -137,7 +138,6 @@ class MansuLoaderApp(ctk.CTk):
         self.after(4000, self._run_main_thread_gc)
         self.after(20, self._apply_appwindow_style)
         self.after(60, self._bring_to_front)
-        self.after(300, self._check_updates_on_startup)
 
     def _run_main_thread_gc(self) -> None:
         """Executa coleta de lixo exclusivamente na thread principal da UI."""
@@ -275,7 +275,7 @@ class MansuLoaderApp(ctk.CTk):
 
         tb_title = ctk.CTkLabel(
             tb_left,
-            text="MansuLoader — YouTube para MP3",
+            text=f"MansuLoader v{APP_VERSION} — YouTube para MP3",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=TEXT_SECONDARY,
         )
