@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "version.json"
+      - "src/version.py"
+  workflow_dispatch:
 
 permissions:
   contents: write
