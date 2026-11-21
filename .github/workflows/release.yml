@@ -26,10 +26,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Executar testes unitários
-        run: |
-          python -m unittest discover -s tests -v
-
       - name: Instalar FFmpeg para embutir no executável
         run: |
           curl -L -o ffmpeg.zip "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
@@ -37,6 +33,10 @@ jobs:
           $ffmpegExe = Get-ChildItem -Path C:\ffmpeg_extract -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
           New-Item -ItemType Directory -Path C:\ffmpeg\bin -Force | Out-Null
           Copy-Item $ffmpegExe.FullName -Destination C:\ffmpeg\bin\ffmpeg.exe -Force
+
+      - name: Executar testes unitários
+        run: |
+          python -m unittest discover -s tests -v
 
       - name: Gerar MansuLoader.exe
         run: |
