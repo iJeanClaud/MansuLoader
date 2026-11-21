@@ -298,6 +298,13 @@ def main() -> None:
                     return
             else:
                 return
+        elif getattr(sys, "frozen", False):
+            installed_exe = get_installed_app_exe().resolve()
+            current_exe = Path(sys.executable).resolve()
+            if installed_exe.is_file() and current_exe != installed_exe:
+                _close_pyi_splash()
+                subprocess.Popen([str(installed_exe)], close_fds=True)
+                return
 
         app_cls, update_info = _show_splash_and_load()
         if update_info is not None:

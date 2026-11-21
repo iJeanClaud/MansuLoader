@@ -203,9 +203,9 @@ def run_updater_ui(url: str, target_exe: Path, pid: int, new_version: str) -> No
     def finish_ok() -> None:
         title_lbl.configure(text="Atualização concluída!", fg="#22C55E")
         ver_text = f" (v{new_version})" if new_version else ""
-        status_var.set(f"O software foi atualizado com sucesso{ver_text}.")
+        status_var.set(f"O software foi atualizado com sucesso{ver_text}. Abrindo...")
         canvas.coords(fill_rect, 0, 0, bar_w, 10)
-        btn_frame.pack(pady=(0, 16))
+        root.after(700, on_open)
 
     def finish_err(err_msg: str) -> None:
         title_lbl.configure(text="Erro na atualização", fg="#EF4444")

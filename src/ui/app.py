@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from tkinter import filedialog
+from tkinter import Menu, filedialog
 from typing import Optional
 
 import customtkinter as ctk
@@ -102,6 +102,8 @@ class MansuLoaderApp(ctk.CTk):
         self.cancel_event = threading.Event()
         self._debounce_job: Optional[str] = None
         self._status_reset_job: Optional[str] = None
+        self._spinner_job: Optional[str] = None
+        self._spinner_idx: int = 0
         self._fetch_token: int = 0
         self._thumb_ctk: Optional[ctk.CTkImage] = None
         self._app_icon_ctk: Optional[ctk.CTkImage] = None
@@ -392,6 +394,7 @@ class MansuLoaderApp(ctk.CTk):
         )
         self.url_entry.grid(row=1, column=0, sticky="ew", padx=(16, 10), pady=(0, 14))
         self.url_entry.bind("<Return>", lambda _e: self._trigger_preview(immediate=True))
+        self._setup_url_context_menu()
 
         self.download_btn = ctk.CTkButton(
             url_card,
@@ -535,8 +538,8 @@ class MansuLoaderApp(ctk.CTk):
 
         self.open_folder_btn = ctk.CTkButton(
             folder_btns,
-            text="Abrir",
-            width=66,
+            text="Abrir pasta",
+            width=96,
             height=32,
             corner_radius=8,
             fg_color=BG_CARD_ALT,
@@ -664,6 +667,93 @@ class MansuLoaderApp(ctk.CTk):
         if folder and Path(folder).is_dir():
             os.startfile(folder)
 
+    def _setup_url_context_menu(self) -> None:
+        """Habilita menu de clique direito (Colar, Copiar, Recortar, Limpar) no campo de URL."""
+        menu = Menu(
+            self,
+            tearoff=0,
+            bg=BG_CARD_ALT,
+            fg=TEXT_PRIMARY,
+            activebackground=ACCENT,
+            activeforeground="#FFFFFF",
+            bd=0,
+        )
+
+        def paste_action() -> None:
+            if str(self.url_entry.cget("state")) == "disabled":
+                return
+            try:
+                clip = self.clipboard_get().strip()
+            except Exception:
+                clip = ""
+            if clip:
+                self.url_var.set(clip)
+
+        def copy_action() -> None:
+            text = self.url_var.get()
+            if text:
+                self.clipboard_clear()
+                self.clipboard_append(text)
+
+        def cut_action() -> None:
+            if str(self.url_entry.cget("state")) == "disabled":
+                return
+            copy_action()
+            self.url_var.set("")
+
+        def select_all_action() -> None:
+            entry_widget = getattr(self.url_entry, "_entry", None)
+            if entry_widget is not None:
+                entry_widget.focus_set()
+                entry_widget.select_range(0, "end")
+
+        menu.add_command(label="Colar", command=paste_action)
+        menu.add_command(label="Copiar", command=copy_action)
+        menu.add_command(label="Recortar", command=cut_action)
+        menu.add_separator()
+        menu.add_command(label="Selecionar tudo", command=select_all_action)
+        menu.add_command(
+            label="Limpar",
+            command=lambda: self.url_var.set("")
+            if str(self.url_entry.cget("state")) != "disabled"
+            else None,
+        )
+
+        def show_menu(event) -> None:
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        target_widget = getattr(self.url_entry, "_entry", self.url_entry)
+        target_widget.bind("<Button-3>", show_menu)
+        self.url_entry.bind("<Button-3>", show_menu)
+
+    def _start_btn_spinner(self) -> None:
+        """Anima o botão Baixar MP3 com spinner enquanto carrega a pré-visualização."""
+        self._stop_btn_spinner(reset_text=False)
+        frames = ("◐", "◓", "◑", "◒")
+
+        def step() -> None:
+            if not self.is_fetching or not self.winfo_exists():
+                return
+            frame = frames[self._spinner_idx % len(frames)]
+            self._spinner_idx += 1
+            self.download_btn.configure(text=f"{frame} Carregando...")
+            self._spinner_job = self.after(120, step)
+
+        step()
+
+    def _stop_btn_spinner(self, reset_text: bool = True) -> None:
+        if self._spinner_job is not None:
+            try:
+                self.after_cancel(self._spinner_job)
+            except Exception:
+                pass
+            self._spinner_job = None
+        if reset_text and not self.is_downloading:
+            self.download_btn.configure(text="Baixar MP3")
+
     def _on_url_changed(self, *_args) -> None:
         if self._debounce_job is not None:
             self.after_cancel(self._debounce_job)
@@ -720,6 +810,7 @@ class MansuLoaderApp(ctk.CTk):
         token = self._fetch_token
         self.is_fetching = True
         self.download_btn.configure(state="disabled")
+        self._start_btn_spinner()
         self.preview_title.configure(text="Carregando pré-visualização...", text_color=TEXT_PRIMARY)
         self.preview_channel.configure(text="Buscando metadados e capa do vídeo...", text_color=TEXT_SECONDARY)
         self.preview_meta.configure(text="")
@@ -744,6 +835,7 @@ class MansuLoaderApp(ctk.CTk):
         if token != self._fetch_token:
             return
         self.is_fetching = False
+        self._stop_btn_spinner()
         self.current_video = info
 
         if info.thumbnail_image is not None:
@@ -769,6 +861,7 @@ class MansuLoaderApp(ctk.CTk):
         if token != self._fetch_token:
             return
         self.is_fetching = False
+        self._stop_btn_spinner()
         self._show_preview_error(message)
 
     def _show_preview_error(self, message: str) -> None:
@@ -851,17 +944,25 @@ class MansuLoaderApp(ctk.CTk):
         self.url_var.set("")
         self._reset_preview()
         self._set_status(f"Concluído! Salvo: {saved_path.name}", SUCCESS, auto_clear_ms=10000)
-        self._show_completion_notice(saved_path.name)
+        self._show_completion_notice(saved_path)
 
-    def _show_completion_notice(self, filename: str) -> None:
-        """Exibe aviso de download concluído com botão Ok e fechamento automático em 5s."""
-        short_name = filename if len(filename) <= 48 else f"{filename[:45]}..."
+    def _show_completion_notice(self, saved_path: Path) -> None:
+        """Exibe aviso de download concluído com Reproduzir, Fechar e timer de 20s."""
+        short_name = saved_path.name if len(saved_path.name) <= 48 else f"{saved_path.name[:45]}..."
+
+        def play_file() -> None:
+            if saved_path.is_file():
+                os.startfile(str(saved_path))
+
         self._show_auto_close_notice(
             window_title="Download concluído",
             header_text="Download concluído!",
             header_color=SUCCESS,
             body_text=f"O arquivo já terminou de baixar:\n{short_name}",
-            seconds=5,
+            seconds=20,
+            primary_btn_text="Reproduzir",
+            primary_btn_command=play_file,
+            close_btn_text="Fechar",
         )
 
     def _show_already_exists_notice(self, filename: str) -> None:
@@ -873,6 +974,7 @@ class MansuLoaderApp(ctk.CTk):
             header_color=WARNING,
             body_text=f"Esta música já existe na pasta selecionada:\n{short_name}",
             seconds=20,
+            close_btn_text="Ok",
         )
 
     def _show_auto_close_notice(
@@ -882,8 +984,11 @@ class MansuLoaderApp(ctk.CTk):
         header_color: str,
         body_text: str,
         seconds: int,
+        primary_btn_text: Optional[str] = None,
+        primary_btn_command: Optional[callable] = None,
+        close_btn_text: str = "Ok",
     ) -> None:
-        """Exibe janela de aviso modal com botão Ok e fechamento automático."""
+        """Exibe janela de aviso modal com fechamento automático."""
         dialog = ctk.CTkToplevel(self)
         dialog.title(window_title)
         dialog.resizable(False, False)
@@ -891,7 +996,7 @@ class MansuLoaderApp(ctk.CTk):
         dialog.transient(self)
         dialog.grab_set()
 
-        dlg_w, dlg_h = 410, 195
+        dlg_w, dlg_h = 420, 200
         self.update_idletasks()
         x = self.winfo_rootx() + max(0, (self.winfo_width() - dlg_w) // 2)
         y = self.winfo_rooty() + max(0, (self.winfo_height() - dlg_h) // 2)
@@ -912,7 +1017,7 @@ class MansuLoaderApp(ctk.CTk):
             font=ctk.CTkFont(size=13),
             text_color=TEXT_PRIMARY,
             justify="center",
-            wraplength=360,
+            wraplength=370,
         ).grid(row=1, column=0, padx=20, pady=(0, 8))
 
         countdown_label = ctk.CTkLabel(
@@ -933,22 +1038,48 @@ class MansuLoaderApp(ctk.CTk):
                     pass
                 timer_id[0] = None
             if dialog.winfo_exists():
-                dialog.grab_release()
+                try:
+                    dialog.grab_release()
+                except Exception:
+                    pass
                 dialog.destroy()
 
-        ok_btn = ctk.CTkButton(
-            dialog,
-            text="Ok",
+        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_row.grid(row=3, column=0, pady=(0, 18))
+
+        if primary_btn_text and primary_btn_command:
+            def on_primary() -> None:
+                close_dialog()
+                primary_btn_command()
+
+            ctk.CTkButton(
+                btn_row,
+                text=primary_btn_text,
+                width=124,
+                height=36,
+                corner_radius=8,
+                fg_color=ACCENT,
+                hover_color=ACCENT_HOVER,
+                text_color="#FFFFFF",
+                font=ctk.CTkFont(size=13, weight="bold"),
+                command=on_primary,
+            ).pack(side="left", padx=(0, 10))
+
+        close_btn = ctk.CTkButton(
+            btn_row,
+            text=close_btn_text,
             width=120,
             height=36,
             corner_radius=8,
-            fg_color=ACCENT,
-            hover_color=ACCENT_HOVER,
+            fg_color=BG_CARD_ALT if primary_btn_text else ACCENT,
+            hover_color="#2A3040" if primary_btn_text else ACCENT_HOVER,
+            border_width=1 if primary_btn_text else 0,
+            border_color=BORDER_SUBTLE,
             text_color="#FFFFFF",
             font=ctk.CTkFont(size=13, weight="bold"),
             command=close_dialog,
         )
-        ok_btn.grid(row=3, column=0, pady=(0, 18))
+        close_btn.pack(side="left")
         dialog.protocol("WM_DELETE_WINDOW", close_dialog)
 
         def tick(remaining: int) -> None:

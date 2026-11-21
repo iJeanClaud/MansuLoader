@@ -1,5 +1,5 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "download_url": "https://github.com/iJeanClaud/MansuLoader/releases/latest/download/MansuLoader.exe",
-  "notes": "Instalador inicial embutido, atualizador independente e versão no título."
+  "notes": "Autoabertura no updater, redirecionamento ao executável instalado, menu de clique direito, spinner e botão Reproduzir."
 }
