@@ -1,6 +1,6 @@
 """Informações de versão e repositório oficial do MansuLoader."""
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 GITHUB_OWNER = "iJeanClaud"
 GITHUB_REPO = "MansuLoader"
 VERSION_JSON_URL = (

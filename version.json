@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "download_url": "https://github.com/iJeanClaud/MansuLoader/releases/latest/download/MansuLoader.exe",
-  "notes": "Versão inicial do MansuLoader com FFmpeg embutido e splash screen."
+  "notes": "Correção de crash ao colar novo link após download, limpeza da barra de progresso e registro de logs."
 }

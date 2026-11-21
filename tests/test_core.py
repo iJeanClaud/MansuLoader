@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from src.config_manager import AppConfig, load_config, save_config
+from src.logger import get_log_file, setup_crash_logging
 from src.update_service import is_newer_version, parse_version, validate_update_url
 from src.youtube_service import (
     check_existing_mp3,
@@ -106,6 +107,27 @@ class TestUpdateService(unittest.TestCase):
         )
         self.assertFalse(validate_update_url("http://github.com/iJeanClaud/MansuLoader"))
         self.assertFalse(validate_update_url("https://evil.com/MansuLoader.exe"))
+
+
+class TestCrashLogger(unittest.TestCase):
+    def test_log_file_path_inside_dot_mansu_loader(self) -> None:
+        import faulthandler
+        import src.logger as app_logger
+
+        with TemporaryDirectory() as tmpdir:
+            with patch.dict("os.environ", {"APPDATA": tmpdir}):
+                log_path = get_log_file()
+                self.assertEqual(log_path, Path(tmpdir) / ".mansu-loader" / "crash.log")
+                logger = setup_crash_logging()
+                logger.info("Teste de log")
+                self.assertTrue(log_path.is_file())
+                faulthandler.disable()
+                if app_logger._FAULTHANDLER_FILE:
+                    app_logger._FAULTHANDLER_FILE.close()
+                    app_logger._FAULTHANDLER_FILE = None
+                for h in list(logger.handlers):
+                    h.close()
+                    logger.removeHandler(h)
 
 
 if __name__ == "__main__":

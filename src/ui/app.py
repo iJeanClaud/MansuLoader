@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import gc
 import os
 import sys
 import threading
@@ -14,6 +15,7 @@ import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageTk
 
 from src.config_manager import AppConfig, load_config, save_config
+from src.logger import log_exception
 from src.update_service import (
     UpdateInfo,
     check_for_update,
@@ -129,9 +131,33 @@ class MansuLoaderApp(ctk.CTk):
         self._center_window()
 
         self.bind("<Map>", self._on_map)
+        self.report_callback_exception = self._on_tk_exception
+        # Evita que o GC do Python colete objetos Tcl/Tk em threads secundárias
+        gc.disable()
+        self.after(4000, self._run_main_thread_gc)
         self.after(20, self._apply_appwindow_style)
         self.after(60, self._bring_to_front)
         self.after(300, self._check_updates_on_startup)
+
+    def _run_main_thread_gc(self) -> None:
+        """Executa coleta de lixo exclusivamente na thread principal da UI."""
+        try:
+            gc.collect()
+        except Exception:
+            pass
+        if self.winfo_exists():
+            self.after(4000, self._run_main_thread_gc)
+
+    def _on_tk_exception(self, exc_type, exc_value, exc_tb) -> None:
+        """Captura exceções de callbacks do Tkinter sem derrubar a interface."""
+        import traceback
+
+        details = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        log_exception(f"Erro em callback da interface:\n{details}")
+        try:
+            self._set_status("Ocorreu um erro interno (registrado no log).", ERROR)
+        except Exception:
+            pass
 
     def _center_window(self) -> None:
         """Calcula o tamanho ideal (incluindo botão de cancelar) e centraliza na tela."""
@@ -188,7 +214,9 @@ class MansuLoaderApp(ctk.CTk):
         self.overrideredirect(False)
         self.iconify()
 
-    def _on_map(self, _event=None) -> None:
+    def _on_map(self, event=None) -> None:
+        if event is not None and event.widget is not self:
+            return
         if self._minimizing and self.state() == "normal":
             self._minimizing = False
             self.overrideredirect(True)
@@ -650,10 +678,22 @@ class MansuLoaderApp(ctk.CTk):
         if is_valid:
             self._debounce_job = self.after(450, lambda: self._trigger_preview(immediate=True))
 
+    def _clear_thumb(self, placeholder: str) -> None:
+        """Remove a thumbnail do CTkLabel sem deixar referência pendente no Tk."""
+        old_thumb = self._thumb_ctk
+        try:
+            if hasattr(self.thumb_label, "_label"):
+                self.thumb_label._label.configure(image="")
+            self.thumb_label.configure(image=None, text=placeholder)
+        except Exception:
+            pass
+        self._thumb_ctk = None
+        del old_thumb
+
     def _reset_preview(self) -> None:
         self.current_video = None
-        self._thumb_ctk = None
-        self.thumb_label.configure(image=None, text="Pré-visualização\ndo MP3")
+        self._clear_thumb("Pré-visualização\ndo MP3")
+
         self.preview_title.configure(
             text="Cole um link acima para carregar a pré-visualização",
             text_color=TEXT_SECONDARY,
@@ -696,6 +736,7 @@ class MansuLoaderApp(ctk.CTk):
             info = fetch_video_info(url)
             self.after(0, lambda: self._on_fetch_success(info, token))
         except Exception as exc:
+            log_exception("Erro ao buscar informações do vídeo", exc)
             err_msg = str(exc) or "Não foi possível carregar o vídeo."
             self.after(0, lambda: self._on_fetch_error(err_msg, token))
 
@@ -706,12 +747,14 @@ class MansuLoaderApp(ctk.CTk):
         self.current_video = info
 
         if info.thumbnail_image is not None:
+            old_thumb = self._thumb_ctk
             rounded = _round_corners(info.thumbnail_image, radius=12)
-            self._thumb_ctk = ctk.CTkImage(light_image=rounded, dark_image=rounded, size=(224, 126))
-            self.thumb_label.configure(image=self._thumb_ctk, text="")
+            new_thumb = ctk.CTkImage(light_image=rounded, dark_image=rounded, size=(224, 126))
+            self.thumb_label.configure(image=new_thumb, text="")
+            self._thumb_ctk = new_thumb
+            del old_thumb
         else:
-            self._thumb_ctk = None
-            self.thumb_label.configure(image=None, text="Sem capa")
+            self._clear_thumb("Sem capa")
 
         self.preview_title.configure(text=info.title, text_color=TEXT_PRIMARY)
         self.preview_channel.configure(text=f"Canal: {info.channel}", text_color=TEXT_SECONDARY)
@@ -730,8 +773,7 @@ class MansuLoaderApp(ctk.CTk):
 
     def _show_preview_error(self, message: str) -> None:
         self.current_video = None
-        self._thumb_ctk = None
-        self.thumb_label.configure(image=None, text="Erro")
+        self._clear_thumb("Erro")
         self.preview_title.configure(text="Não foi possível carregar o vídeo", text_color=ERROR)
         self.preview_channel.configure(text=message[:160], text_color=TEXT_SECONDARY)
         self.preview_meta.configure(text="")
@@ -790,6 +832,7 @@ class MansuLoaderApp(ctk.CTk):
         except DownloadCancelled:
             self.after(0, self._on_download_cancelled)
         except Exception as exc:
+            log_exception("Erro durante o download/conversão MP3", exc)
             err_msg = str(exc) or "Erro inesperado durante o download."
             self.after(0, lambda: self._on_download_error(err_msg))
 
@@ -803,10 +846,10 @@ class MansuLoaderApp(ctk.CTk):
 
     def _on_download_complete(self, saved_path: Path, title: str, quality: str) -> None:
         self._finish_download_state()
-        self.url_var.set("")
-        self._reset_preview()
         self.progress_bar.set(0)
         self.metrics_label.configure(text="")
+        self.url_var.set("")
+        self._reset_preview()
         self._set_status(f"Concluído! Salvo: {saved_path.name}", SUCCESS, auto_clear_ms=10000)
         self._show_completion_notice(saved_path.name)
 

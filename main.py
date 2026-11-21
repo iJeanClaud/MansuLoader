@@ -133,9 +133,16 @@ def _show_splash_and_load() -> type:
 
 
 def main() -> None:
-    app_cls = _show_splash_and_load()
-    app = app_cls()
-    app.mainloop()
+    from src.logger import log_exception, setup_crash_logging
+
+    setup_crash_logging()
+    try:
+        app_cls = _show_splash_and_load()
+        app = app_cls()
+        app.mainloop()
+    except Exception as exc:
+        log_exception("Erro fatal no aplicativo", exc)
+        raise
 
 
 if __name__ == "__main__":
